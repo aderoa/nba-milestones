@@ -50,6 +50,9 @@ STAT_KEY = dict(zip(STATS, KEYS))
 TOP_N = 200
 MILESTONE_STEP = {"PTS":1000,"REB":500,"AST":500,"BLK":100,"STL":100,"FG3M":100}
 PASS_RANK_LIMIT = 200   # full board — passes anywhere in the top 200 are feed-worthy
+WATCH_NEED = {"PTS":30,"REB":12,"AST":12,"BLK":4,"STL":4,"FG3M":5}   # "within reach" margins
+WATCH_ACTIVE_DAYS = 12   # played a playoff game this recently = still alive
+WATCH_MAX = 30
 STAT_PHRASE = {"PTS":"career playoff points","REB":"career playoff rebounds",
                "AST":"career playoff assists","BLK":"career playoff blocks",
                "STL":"career playoff steals","FG3M":"career playoff three-pointers"}
@@ -252,6 +255,41 @@ def replay_season(sy, base_players, disp):
     log(f"replay {sy}: {len(by_date)} playoff dates, {len(events)} milestone event(s)")
     return events
 
+def build_watch_list(baseline, active_meta, disp):
+    """Players still alive in the playoffs who are within reach of a threshold
+    or of passing someone on a top-200 board. active_meta: name->{team,last}."""
+    out=[]
+    for si,stat in enumerate(STATS):
+        if stat not in WATCH_NEED: continue
+        need_max=WATCH_NEED[stat]
+        totals={n:v[si] for n,v in baseline.items() if v[si]>0}
+        ordered=sorted(totals.items(), key=lambda x:(-x[1],x[0]))
+        rank={n:i+1 for i,(n,_) in enumerate(ordered)}
+        for n,meta in active_meta.items():
+            cur=totals.get(n,0)
+            if cur<=0: continue
+            # next round-number threshold
+            step=MILESTONE_STEP[stat]
+            nxt=((int(cur)//step)+1)*step
+            need=nxt-int(cur)
+            if 0<need<=need_max:
+                # thresholds get a flat mid prominence weight
+                out.append({"name":disp.get(n,n),"team":meta["team"],"stat":stat,
+                            "kind":"threshold","need":need,"score":need/need_max+0.4,
+                            "text":f"{disp.get(n,n)} needs {need} for {nxt:,} {STAT_PHRASE[stat]}"})
+            # next player above on the board (target must be in top 200)
+            r=rank.get(n)
+            if r and r>1:
+                above_n,above_t=ordered[r-2]
+                gap=int(above_t)-int(cur)+1
+                if 0<gap<=need_max and r-1<=TOP_N:
+                    # closeness + prominence: passing #57 beats passing #176
+                    out.append({"name":disp.get(n,n),"team":meta["team"],"stat":stat,
+                                "kind":"pass","need":gap,"score":gap/need_max+(r-1)/TOP_N,
+                                "text":f"{disp.get(n,n)} needs {gap} to pass {disp.get(above_n,above_n)} for #{r-1} on the {LIST_PHRASE[stat]}"})
+    out.sort(key=lambda x:x["score"])
+    return out[:WATCH_MAX]
+
 def main():
     os.makedirs(DATA, exist_ok=True)
     base=load_or_roll_base()
@@ -260,6 +298,7 @@ def main():
 
     # current season playoff rows from DB
     baseline={n:list(v) for n,v in base["players"].items()}
+    active_meta={}
     ingested=set()
     try:
         gtext=fetch_text(RAW+f"data/{sy}/games.ndjson")
@@ -270,6 +309,18 @@ def main():
                 except Exception: pass
         btext=fetch_text(RAW+f"data/{sy}/boxscores.ndjson")
         n=add_rows_from_ndjson(btext, baseline)
+        for line in btext.split("\n"):
+            line=line.strip()
+            if not line: continue
+            try: row=json.loads(line)
+            except Exception: continue
+            gid=str(row.get("gameId",""))
+            if len(gid)<3 or gid[2]!="4": continue
+            nm=row.get("name")
+            if not nm: continue
+            m=active_meta.setdefault(nm,{"team":row.get("team"),"last":""})
+            if (row.get("date") or "")>m["last"]:
+                m["last"]=row.get("date") or ""; m["team"]=row.get("team")
         log(f"current season {sy}: +{n} playoff rows from DB; {len(ingested)} games ingested")
     except Exception as e:
         log(f"current season files unavailable ({e}) — base only")
@@ -302,8 +353,19 @@ def main():
     mstate["feed"]=mstate["feed"][:600]
     json.dump(mstate, open(MSTATE_PATH,"w",encoding="utf-8"), separators=(",",":"), ensure_ascii=False)
 
+    cutoff_active=(datetime.now(timezone.utc)-timedelta(days=WATCH_ACTIVE_DAYS)).date().isoformat()
+    alive={n:m for n,m in active_meta.items() if (m.get("last") or "")>=cutoff_active}
+    for n in deltas: alive.setdefault(n,{"team":None,"last":""})   # live tonight = alive
+    live_totals={n:list(v) for n,v in baseline.items()}
+    for n,d in deltas.items():
+        a=live_totals.setdefault(n,[0]*9)
+        for i in range(9): a[i]+=d[i]
+    watch=build_watch_list(live_totals, alive, disp)
+    log(f"watch list: {len(watch)} entries across {len(alive)} active players")
+
     live={"last_polled_utc":datetime.now(timezone.utc).isoformat(),
-          "active_games":active, "stats":boards, "recent_milestones":mstate["feed"]}
+          "active_games":active, "stats":boards, "watch_list":watch,
+          "recent_milestones":mstate["feed"]}
     json.dump(live, open(LIVE_PATH,"w",encoding="utf-8"), separators=(",",":"), ensure_ascii=False)
     log(f"wrote leaderboards: {new} new milestone(s), feed={len(mstate['feed'])}")
 
