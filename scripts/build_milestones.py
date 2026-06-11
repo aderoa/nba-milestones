@@ -49,7 +49,7 @@ STATS = ["PTS","REB","AST","BLK","STL","FG3M","TOV","PF"]        # front-end
 STAT_KEY = dict(zip(STATS, KEYS))
 TOP_N = 200
 MILESTONE_STEP = {"PTS":1000,"REB":500,"AST":500,"BLK":100,"STL":100,"FG3M":100}
-PASS_RANK_LIMIT = 50
+PASS_RANK_LIMIT = 200   # full board — passes anywhere in the top 200 are feed-worthy
 STAT_PHRASE = {"PTS":"career playoff points","REB":"career playoff rebounds",
                "AST":"career playoff assists","BLK":"career playoff blocks",
                "STL":"career playoff steals","FG3M":"career playoff three-pointers"}
@@ -298,7 +298,8 @@ def main():
         if key in mstate["announced"]: continue
         mstate["announced"][key]=ts
         mstate["feed"].insert(0, {"ts":ts,"text":text}); new+=1
-    mstate["feed"]=mstate["feed"][:300]
+    mstate["feed"].sort(key=lambda m:m["ts"], reverse=True)   # keep strict date order after replays
+    mstate["feed"]=mstate["feed"][:600]
     json.dump(mstate, open(MSTATE_PATH,"w",encoding="utf-8"), separators=(",",":"), ensure_ascii=False)
 
     live={"last_polled_utc":datetime.now(timezone.utc).isoformat(),
