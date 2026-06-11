@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBA Playoff Milestones · HoopsMatic</title>
+<meta name="description" content="Live top-200 NBA career PLAYOFF leaderboards across 8 stats with in-game overlay and milestone tracking.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --bg-elev: #ffffff;
+    --bg-table-head: #f3f4f6;
+    --bg-live-row: #fef2f2;
+    --text: #111827;
+    --text-soft: #4b5563;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --border-strong: #d1d5db;
+    --accent: #b45309;
+    --live: #dc2626;
+    --pass: #047857;
+    --header-font: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --body-font: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--body-font);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container { max-width: 980px; margin: 0 auto; padding: 28px 18px 64px; }
+
+  header { margin-bottom: 18px; }
+  .brand {
+    font-family: var(--header-font);
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  h1 {
+    font-family: var(--header-font);
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin: 4px 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle { color: var(--text-soft); font-size: 0.92rem; margin-bottom: 0; }
+  .subtitle code { font-family: var(--header-font); font-size: 0.85em; color: var(--text); }
+
+  .live-bar {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 0.88rem;
+    margin: 18px 0 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+  .live-pulse {
+    display: inline-block;
+    width: 8px; height: 8px;
+    background: var(--live);
+    border-radius: 50%;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+  .game-pill {
+    background: var(--bg-table-head);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-family: var(--header-font);
+    font-size: 0.78rem;
+    color: var(--text-soft);
+  }
+  .game-pill .status { color: var(--live); margin-left: 4px; font-weight: 600; }
+
+  .tabs {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .tab {
+    font-family: var(--header-font);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 9px 13px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg-elev);
+    cursor: pointer;
+    color: var(--muted);
+    transition: all 0.12s;
+    user-select: none;
+  }
+  .tab:hover { color: var(--text); border-color: var(--border-strong); }
+  .tab.active {
+    background: var(--text);
+    color: var(--bg-elev);
+    border-color: var(--text);
+  }
+  .tab-count {
+    display: inline-block;
+    background: var(--bg-table-head);
+    color: var(--muted);
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 0.62rem;
+    margin-left: 4px;
+    vertical-align: 1px;
+  }
+  .tab.active .tab-count {
+    background: rgba(255,255,255,0.18);
+    color: var(--bg-elev);
+  }
+
+  .milestone-day { margin-bottom: 18px; }
+  .milestone-day:last-child { margin-bottom: 0; }
+  .milestone-day-header {
+    font-family: var(--header-font);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 0 4px 8px;
+  }
+
+  .table-wrap {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: var(--bg-table-head);
+    font-family: var(--header-font);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 11px 14px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+  }
+  thead th.right { text-align: right; }
+  tbody td {
+    padding: 9px 14px;
+    font-size: 0.92rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.live { background: var(--bg-live-row); }
+  tbody tr.live td { font-weight: 600; }
+  td.rank {
+    font-family: var(--header-font);
+    color: var(--muted);
+    width: 84px;
+    text-align: right;
+    padding-right: 18px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  tr.live td.rank { color: var(--text); }
+  td.total {
+    font-family: var(--header-font);
+    font-weight: 600;
+    text-align: right;
+    width: 110px;
+    color: var(--text);
+  }
+  .live-marker { color: var(--live); margin-left: 8px; font-size: 0.75rem; }
+  .delta {
+    color: var(--accent);
+    font-family: var(--header-font);
+    font-size: 0.78rem;
+    margin-left: 6px;
+    font-weight: 600;
+  }
+
+  .section-title {
+    font-family: var(--header-font);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    font-weight: 600;
+    margin: 36px 0 12px;
+  }
+  .milestones-list { display: flex; flex-direction: column; gap: 6px; }
+  .milestone-item {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+  .milestone-ts {
+    color: var(--muted);
+    font-family: var(--header-font);
+    font-size: 0.7rem;
+    margin-bottom: 2px;
+  }
+  .milestone-text strong {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-family: var(--header-font);
+    margin-bottom: 14px;
+  }
+  .meta-controls {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .filter-group {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-elev);
+  }
+  .filter-pill {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: var(--header-font);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+  .filter-pill + .filter-pill { border-left: 1px solid var(--border); }
+  .filter-pill:hover:not(.active) { color: var(--text); }
+  .filter-pill.active {
+    background: var(--text);
+    color: var(--bg-elev);
+  }
+  .filter-group.hidden { display: none; }
+  .meta-row .refreshing {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .rank-up {
+    color: var(--pass);
+    font-family: var(--header-font);
+    font-size: 0.72rem;
+    margin-left: 4px;
+    font-weight: 700;
+    vertical-align: 1px;
+  }
+  .passed-list {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 400;
+    margin-left: 6px;
+  }
+  .passed-list strong {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .spinner {
+    width: 10px; height: 10px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--text);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-align: center;
+  }
+  footer a { color: var(--text-soft); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+  .error-state { color: var(--live); }
+
+  @media (max-width: 600px) {
+    .container { padding: 20px 12px 48px; }
+    h1 { font-size: 1.3rem; }
+    td.total { width: 80px; font-size: 0.85rem; }
+    tbody td { padding: 8px 10px; font-size: 0.85rem; }
+    thead th { padding: 9px 10px; }
+    td.rank { padding-right: 10px; width: 64px; }
+  }
+
+  /* Embed mode: hide chrome for use inside iframes (Presto, etc.) */
+  body.embed header,
+  body.embed footer { display: none; }
+  body.embed .container { padding: 12px; max-width: none; }
+
+  /* Log-only mode: show just the milestones list */
+  body.log-only .live-bar,
+  body.log-only .meta-row,
+  body.log-only .tabs,
+  body.log-only .table-wrap { display: none !important; }
+  body.log-only #milestones-wrap { display: block !important; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="brand">HoopsMatic / NBA Playoff Milestones</div>
+  <h1>NBA Playoff All-Time Leaderboards</h1>
+  <p class="subtitle">Live top-200 in <code>PTS · REB · AST · BLK · STL · 3PM · TOV · PF</code>. Active in-game players are flagged with their today-delta.</p>
+</header>
+
+<div class="live-bar" id="live-bar">
+  <span style="color:var(--muted)">Loading game state…</span>
+</div>
+
+<div class="meta-row">
+  <span id="last-updated">—</span>
+  <div class="meta-controls">
+    <div class="filter-group" id="filter-group">
+      <button class="filter-pill active" data-filter="all">All players</button>
+      <button class="filter-pill" data-filter="active">Active only</button>
+    </div>
+    <span class="refreshing" id="refreshing"><span class="spinner"></span> auto-refresh 60s</span>
+  </div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="table-wrap" id="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th class="right">Rank</th>
+        <th>Player</th>
+        <th class="right">Career total</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      <tr><td colspan="3" class="empty-state">Loading rankings…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="milestones-wrap" id="milestones-wrap" style="display:none">
+  <div id="milestones-list" class="milestones-list">
+    <div class="empty-state" style="padding:24px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev)">
+      None yet — milestones will appear here as players cross thresholds.
+    </div>
+  </div>
+</div>
+
+<footer>
+  <a href="https://github.com/aderoa/nba-milestones" target="_blank" rel="noopener">github.com/aderoa/nba-milestones</a>
+  · auto-updated by GitHub Actions
+</footer>
+</div>
+
+<script>
+const STATS = ['PTS', 'REB', 'AST', 'BLK', 'STL', 'FG3M', 'TOV', 'PF'];
+const TABS = [...STATS, 'MILESTONES'];
+const TITLES = {
+  PTS: 'Points', REB: 'Rebounds', AST: 'Assists', BLK: 'Blocks',
+  STL: 'Steals', FG3M: 'Three-pointers', TOV: 'Turnovers', PF: 'Fouls',
+  MILESTONES: 'Milestones',
+};
+
+// URL params: ?embed=1 (Presto-friendly chrome-less view), ?view=log (only milestones)
+const params = new URLSearchParams(location.search);
+if (params.get('embed') === '1') document.body.classList.add('embed');
+const initialView = params.get('view');
+if (initialView === 'log') document.body.classList.add('log-only');
+
+let currentStat = (location.hash || '').replace('#', '').toUpperCase();
+if (initialView === 'log') currentStat = 'MILESTONES';
+if (!TABS.includes(currentStat)) currentStat = 'PTS';
+let liveData = null;
+let activeOnly = false;
+
+function fmt(n) { return n.toLocaleString(); }
+
+function renderTabs() {
+  const el = document.getElementById('tabs');
+  const milestoneCount = liveData && liveData.recent_milestones ? liveData.recent_milestones.length : 0;
+  el.innerHTML = TABS.map(s => {
+    let label = TITLES[s];
+    if (s === 'MILESTONES' && milestoneCount > 0) {
+      label += ` <span class="tab-count">${milestoneCount}</span>`;
+    }
+    return `<div class="tab ${s === currentStat ? 'active' : ''}" data-stat="${s}">${label}</div>`;
+  }).join('');
+  el.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      currentStat = t.dataset.stat;
+      history.replaceState(null, '', '#' + currentStat);
+      renderTabs();
+      updateView();
+    });
+  });
+}
+
+function updateView() {
+  const isMilestones = currentStat === 'MILESTONES';
+  document.getElementById('table-wrap').style.display = isMilestones ? 'none' : '';
+  document.getElementById('milestones-wrap').style.display = isMilestones ? '' : 'none';
+  // Hide filter controls on the Milestones tab — doesn't apply
+  const filterGroup = document.getElementById('filter-group');
+  if (filterGroup) filterGroup.classList.toggle('hidden', isMilestones);
+  if (isMilestones) renderMilestones();
+  else renderTable();
+}
+
+function formatNameList(names) {
+  if (!names || names.length === 0) return '';
+  if (names.length === 1) return `<strong>${escapeHtml(names[0])}</strong>`;
+  if (names.length === 2) {
+    return `<strong>${escapeHtml(names[0])}</strong> and <strong>${escapeHtml(names[1])}</strong>`;
+  }
+  const head = names.slice(0, -1).map(n => `<strong>${escapeHtml(n)}</strong>`).join(', ');
+  return `${head}, and <strong>${escapeHtml(names[names.length - 1])}</strong>`;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('rows');
+  if (!liveData || !liveData.stats || !liveData.stats[currentStat]) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">No data for this stat.</td></tr>';
+    return;
+  }
+  let rows = liveData.stats[currentStat].rows;
+  if (activeOnly) rows = rows.filter(r => r.live);
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">No active players right now.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    // Rank cell: number, plus ↑N if they've climbed today
+    let rankCell = String(r.rank);
+    if (r.live && r.baseline_rank && r.baseline_rank > r.rank) {
+      const moved = r.baseline_rank - r.rank;
+      rankCell += `<span class="rank-up" title="Up ${moved} from #${r.baseline_rank} entering today">↑${moved}</span>`;
+    }
+    // Name cell: name, then live marker, +delta, and inline passed list
+    let nameCell = escapeHtml(r.name);
+    if (r.live) {
+      nameCell += '<span class="live-marker">🔴</span>';
+      if (r.delta > 0) nameCell += `<span class="delta">+${r.delta}</span>`;
+      if (r.passed_today && r.passed_today.length > 0) {
+        nameCell += `<span class="passed-list">passed ${formatNameList(r.passed_today)}</span>`;
+      }
+    }
+    return `<tr class="${r.live ? 'live' : ''}">
+      <td class="rank">${rankCell}</td>
+      <td>${nameCell}</td>
+      <td class="total">${fmt(r.total)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderLiveBar() {
+  const el = document.getElementById('live-bar');
+  if (!liveData) return;
+  const games = (liveData.active_games || []).filter(g => g.in_progress);
+  if (games.length === 0) {
+    el.innerHTML = '<span style="color:var(--muted)">No games currently in progress.</span>';
+    return;
+  }
+  el.innerHTML = `<span class="live-pulse"></span>
+    <strong>${games.length} live game${games.length > 1 ? 's' : ''}</strong>
+    ${games.map(g => `<span class="game-pill">${g.short || '—'}<span class="status">${g.status || ''}</span></span>`).join('')}`;
+}
+
+function renderMilestones() {
+  const el = document.getElementById('milestones-list');
+  const list = liveData && liveData.recent_milestones || [];
+  if (list.length === 0) {
+    el.innerHTML = `<div class="empty-state" style="padding:24px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev)">
+      None yet — milestones will appear here as players cross thresholds.
+    </div>`;
+    return;
+  }
+  // Group by date for visual hierarchy
+  const byDate = {};
+  list.forEach(m => {
+    const d = new Date(m.ts);
+    const key = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    (byDate[key] = byDate[key] || []).push(m);
+  });
+  const html = Object.entries(byDate).map(([date, items]) => `
+    <div class="milestone-day">
+      <div class="milestone-day-header">${date}</div>
+      ${items.map(m => {
+        const t = new Date(m.ts);
+        const tStr = t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        return `<div class="milestone-item">
+          <div class="milestone-ts">${tStr}</div>
+          <div class="milestone-text">${escapeHtml(m.text)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  `).join('');
+  el.innerHTML = html;
+}
+
+function renderTimestamp() {
+  const el = document.getElementById('last-updated');
+  if (!liveData) { el.textContent = '—'; return; }
+  const t = new Date(liveData.last_polled_utc);
+  el.textContent = `Last poll: ${t.toLocaleString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}`;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = String(s == null ? '' : s);
+  return div.innerHTML;
+}
+
+async function fetchData() {
+  try {
+    const res = await fetch('data/leaderboards_live.json?_=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    liveData = await res.json();
+    renderTabs();
+    renderLiveBar();
+    updateView();
+    renderTimestamp();
+  } catch (e) {
+    console.error('Fetch failed:', e);
+    const bar = document.getElementById('live-bar');
+    bar.innerHTML = `<span class="error-state">Failed to load live state: ${escapeHtml(e.message)}.</span>`;
+  }
+}
+
+renderTabs();
+
+// Wire active-only / all-players segmented filter
+document.querySelectorAll('.filter-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const choice = btn.dataset.filter;
+    activeOnly = (choice === 'active');
+    document.querySelectorAll('.filter-pill').forEach(b => {
+      b.classList.toggle('active', b.dataset.filter === choice);
+    });
+    updateView();
+  });
+});
+
+fetchData();
+setInterval(fetchData, 60000);
+</script>
+</body>
+</html>
