@@ -173,10 +173,10 @@ def today_overlay(ingested_gids):
 
 # ---------------- boards + milestones ----------------
 
-def build_boards(baseline, deltas, disp):
+def build_boards(baseline, deltas, disp, ts=None):
     """baseline: name->[8+gp]; deltas: name->[8+gp]."""
     boards={}; events=[]
-    now=datetime.now(timezone.utc).isoformat()
+    now=ts or datetime.now(timezone.utc).isoformat()
     for si,stat in enumerate(STATS):
         base_tot={n:v[si] for n,v in baseline.items() if v[si]>0}
         live_tot=dict(base_tot)
@@ -219,6 +219,39 @@ def build_boards(baseline, deltas, disp):
         boards[stat]={"rows":rows}
     return boards, events
 
+def replay_season(sy, base_players, disp):
+    """Walk the current season's already-ingested playoff games date by date,
+    emitting the milestone events they produced, timestamped to game date."""
+    text=fetch_text(RAW+f"data/{sy}/boxscores.ndjson")
+    by_date={}
+    for line in text.split("\n"):
+        line=line.strip()
+        if not line: continue
+        try: row=json.loads(line)
+        except Exception: continue
+        gid=str(row.get("gameId",""))
+        if len(gid)<3 or gid[2]!="4": continue
+        by_date.setdefault(row.get("date",""),[]).append(row)
+    running={n:list(v) for n,v in base_players.items()}
+    events=[]
+    for date in sorted(d for d in by_date if d):
+        deltas={}
+        for row in by_date[date]:
+            name=row.get("name")
+            if not name: continue
+            a=deltas.setdefault(name,[0]*9)
+            for i,k in enumerate(KEYS):
+                v=row.get(k)
+                if isinstance(v,(int,float)): a[i]+=v
+            a[8]+=1
+        _,ev=build_boards(running,deltas,disp,ts=f"{date}T23:00:00Z")
+        events.extend(ev)
+        for n,d in deltas.items():
+            a=running.setdefault(n,[0]*9)
+            for i in range(9): a[i]+=d[i]
+    log(f"replay {sy}: {len(by_date)} playoff dates, {len(events)} milestone event(s)")
+    return events
+
 def main():
     os.makedirs(DATA, exist_ok=True)
     base=load_or_roll_base()
@@ -252,7 +285,14 @@ def main():
         mstate=json.load(open(MSTATE_PATH, encoding="utf-8"))
     cutoff=(datetime.now(timezone.utc)-timedelta(days=10)).isoformat()
     mstate["announced"]={k:v for k,v in mstate.get("announced",{}).items() if v>=cutoff}
-    mstate["feed"]=[m for m in mstate.get("feed",[]) if m["ts"]>=cutoff]
+    mstate["feed"]=mstate.get("feed",[])           # capped by count below, not by age
+    rep=os.environ.get("REPLAY_SEASON","").strip()
+    if rep:
+        try:
+            events=replay_season(int(rep), base["players"], disp)+events
+        except Exception as e:
+            log(f"replay failed ({e}) — continuing with live events only")
+    events=sorted(events, key=lambda e:e[1])        # chronological insert -> newest first
     new=0
     for key, ts, text in events:
         if key in mstate["announced"]: continue
