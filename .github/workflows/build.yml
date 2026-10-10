@@ -26,37 +26,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # TEMPORARY, branch only. Python, not shell: the first attempt used
-      # a shell variable holding a UA with spaces, which curl split into
-      # separate arguments and produced nonsense.
-      - name: Path map probe
+      # TEMPORARY, branch only. ROUND 3: the earlier runner probe sent the
+      # LEAN header set and got 403 everywhere. On Alberto's machine the same
+      # path answered 200 when the stats-flavoured headers were used. So the
+      # question is no longer only "which path" but "which headers" -- and
+      # whether the runner's 403 was ever an IP block at all.
+      - name: Header x path probe
         run: |
           python - <<'PY'
-          import json, urllib.request, urllib.error
-          H = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/124.0 Safari/537.36"),
-               "Referer": "https://www.nba.com/",
-               "Accept": "application/json, text/plain, */*"}
-          GID = "0012600015"
+          import urllib.request, urllib.error
+          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+          LEAN = {"User-Agent": UA, "Referer": "https://www.nba.com/",
+                  "Origin": "https://www.nba.com",
+                  "Accept": "application/json, text/plain, */*"}
+          STATS = dict(LEAN, **{"Accept-Language": "en-US,en;q=0.9",
+                                "x-nba-stats-origin": "stats",
+                                "x-nba-stats-token": "true",
+                                "Connection": "keep-alive"})
           C = "https://cdn.nba.com/static/json"
-          urls = [
-            ("cdn liveData boxscore LIVE", f"{C}/liveData/boxscore/boxscore_{GID}.json"),
-            ("cdn liveData playbyplay", f"{C}/liveData/playbyplay/playbyplay_{GID}.json"),
-            ("cdn liveData todaysScoreboard", f"{C}/liveData/scoreboard/todaysScoreboard_00.json"),
-            ("cdn liveData dated scoreboard", f"{C}/liveData/scoreboard/scoreboard_20261010.json"),
-            ("cdn staticData schedule_1", f"{C}/staticData/scheduleLeagueV2_1.json"),
-            ("cdn logos svg", "https://cdn.nba.com/logos/nba/1610612738/global/L/logo.svg"),
-            ("stats scoreboardv3", "https://stats.nba.com/stats/scoreboardv3?GameDate=2026-10-10&LeagueID=00"),
-          ]
-          for label, u in urls:
-              try:
-                  with urllib.request.urlopen(urllib.request.Request(u, headers=H), timeout=20) as r:
-                      print(f"::error::PROBE {label} -> {r.getcode()} ({len(r.read()):,} bytes)")
-              except urllib.error.HTTPError as e:
-                  print(f"::error::PROBE {label} -> HTTP {e.code}")
-              except Exception as e:
-                  print(f"::error::PROBE {label} -> {type(e).__name__}")
+          paths = [("boxscore", f"{C}/liveData/boxscore/boxscore_0012600015.json"),
+                   ("todaysScoreboard", f"{C}/liveData/scoreboard/todaysScoreboard_00.json"),
+                   ("schedule_1", f"{C}/staticData/scheduleLeagueV2_1.json")]
+          for pname, u in paths:
+              for hname, h in (("lean", LEAN), ("stats", STATS)):
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(u, headers=h), timeout=20) as r:
+                          res = f"{r.getcode()} ({len(r.read()):,} bytes)"
+                  except urllib.error.HTTPError as e:
+                      res = f"HTTP {e.code}"
+                  except Exception as e:
+                      res = type(e).__name__
+                  print(f"::error::PROBE {pname} + {hname} -> {res}")
           PY
         continue-on-error: true
 
