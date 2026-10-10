@@ -26,27 +26,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # TEMPORARY, branch only. Python urllib gets 403 from cdn.nba.com on
-      # both Alberto's residential IP and this runner, which rules out an IP
-      # block and points at the client. Each probe shouts its result through
-      # ::error:: because this session cannot download run logs.
-      - name: Client fingerprint probe
-        run: |
-          SB=https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-          p () { echo "::error::PROBE $1 -> $2"; }
-          p "control api.github.com" "$(curl -s -o /dev/null -w '%{http_code}' https://api.github.com || echo ERR)"
-          p "curl default" "$(curl -s -o /dev/null -w '%{http_code}' "$SB" || echo ERR)"
-          p "curl browser hdrs" "$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" -H 'Accept: application/json, text/plain, */*' -H 'Referer: https://www.nba.com/' "$SB" || echo ERR)"
-          p "curl http2 browser" "$(curl -s --http2 -o /dev/null -w '%{http_code}' -A "$UA" -H 'Accept: application/json, text/plain, */*' -H 'Accept-Language: en-US,en;q=0.9' -H 'Referer: https://www.nba.com/' -H 'sec-ch-ua: "Chromium";v="124"' -H 'sec-fetch-mode: cors' -H 'sec-fetch-site: same-site' "$SB" || echo ERR)"
-          p "node fetch" "$(node -e 'fetch(process.env.SB,{headers:{"User-Agent":process.env.UA,"Accept":"application/json"}}).then(r=>console.log(r.status)).catch(e=>console.log("ERR"))' || echo ERR)"
-          p "stats.nba.com" "$(curl -s -m 25 -o /dev/null -w '%{http_code}' -A "$UA" -H 'Referer: https://www.nba.com/' -H 'Accept: application/json, text/plain, */*' -H 'x-nba-stats-origin: stats' -H 'x-nba-stats-token: true' 'https://stats.nba.com/stats/scoreboardv3?GameDate=2026-10-10&LeagueID=00' || echo ERR)"
-          p "cdn via nba.com host" "$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" 'https://www.nba.com/game' || echo ERR)"
-        env:
-          SB: https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json
-          UA: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
-        continue-on-error: true
-
       - name: Build
         env:
           REPLAY_SEASON: ${{ github.event.inputs.replay_season }}
@@ -69,7 +48,11 @@ jobs:
           if f.get("ok"):
               print(f"live feed OK - {f.get('games_seen',0)} game(s) {f.get('by_type')}")
               sys.exit(0)
-          print("::error::cdn.nba.com refused this runner: "
-                f"http={f.get('http')} {f.get('error')}")
-          sys.exit(1)
+          msg = (f"cdn.nba.com refused this runner: http={f.get('http')} "
+                 f"since {f.get('down_since')} (last OK {f.get('last_ok_utc')})")
+          if f.get("newly_broken"):
+              print(f"::error::{msg}")      # red run + email, once, on the break
+              sys.exit(1)
+          print(f"::warning::{msg} - still down, alarm already raised")
+          sys.exit(0)
           PY

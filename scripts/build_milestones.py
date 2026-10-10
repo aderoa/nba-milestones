@@ -409,6 +409,26 @@ def main():
     watch=build_watch_list(live_totals, alive, disp)
     log(f"watch list: {len(watch)} entries across {len(alive)} active players")
 
+    # State-change alarm, not a repeating one. A gate that goes red every run
+    # for a six-month outage trains you to ignore it, so carry the previous
+    # verdict forward: the workflow fails on the RUN THAT BREAKS, and
+    # down_since then says how long it has been broken.
+    prev={}
+    try:
+        prev=(json.load(open(LIVE_PATH,encoding="utf-8")) or {}).get("feed") or {}
+    except Exception: pass
+    FEED_HEALTH["prev_ok"]=prev.get("ok")
+    if FEED_HEALTH.get("ok"):
+        FEED_HEALTH["down_since"]=None
+        FEED_HEALTH["last_ok_utc"]=FEED_HEALTH["checked_utc"]
+    else:
+        FEED_HEALTH["down_since"]=(prev.get("down_since")
+                                   or FEED_HEALTH["checked_utc"])
+        FEED_HEALTH["last_ok_utc"]=prev.get("last_ok_utc")
+    # True only on the transition into failure — what the gate keys on.
+    FEED_HEALTH["newly_broken"]=bool(not FEED_HEALTH.get("ok")
+                                     and prev.get("ok") is not False)
+
     live={"last_polled_utc":datetime.now(timezone.utc).isoformat(),
           "active_games":active, "stats":boards, "watch_list":watch,
           "recent_milestones":mstate["feed"],
@@ -420,7 +440,9 @@ def main():
             f" scoreboard {FEED_HEALTH.get('by_type')}")
     else:
         log(f"live feed REFUSED — http={FEED_HEALTH.get('http')}"
-            f" {FEED_HEALTH.get('error')}")
+            f" since {FEED_HEALTH.get('down_since')}"
+            f" (last OK {FEED_HEALTH.get('last_ok_utc')}): "
+            f"{FEED_HEALTH.get('error')}")
 
 if __name__=="__main__":
     main()
