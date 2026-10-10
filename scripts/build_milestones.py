@@ -11,7 +11,15 @@ the DB), producing data/leaderboards_live.json for the front-end:
 
   { last_polled_utc, active_games:[{in_progress,short,status}],
     stats:{ PTS:{rows:[{rank,name,total,live,delta,baseline_rank,passed_today}]}, ... },
-    recent_milestones:[{ts,text}] }
+    recent_milestones:[{ts,text}],
+    feed:{ok,http,error,games_seen,by_type,playoff_games,...} }
+
+The `feed` block exists because the live overlay used to fail invisibly: the
+scoreboard call is wrapped in try/except, and an October day with no playoff
+games produced byte-identical output to a dead endpoint. It records what the
+scoreboard actually answered, INCLUDING games of every season type, so one
+look at the committed JSON says whether cdn.nba.com is still talking to us.
+The workflow's last step reads it and goes red when it is not.
 
 stdlib only. Runs on GitHub Actions (cron */15) or locally.
 """
@@ -62,6 +70,21 @@ LIST_PHRASE = {"PTS":"all-time playoff scoring list","REB":"all-time playoff reb
 
 def log(m): print(m, flush=True)
 
+# Season type by the third character of a game id — kept here so the feed
+# block can report what the scoreboard carried, not just what we keep.
+SEASON_TYPE={"1":"preseason","2":"regular","3":"allstar",
+             "4":"playoff","5":"playin","6":"cup"}
+
+FEED_HEALTH={}        # filled by today_overlay(), written into the JSON
+
+class FetchError(RuntimeError):
+    """RuntimeError, so every existing `except Exception` still catches it,
+    but carrying the HTTP status so the feed block can report 403 vs 404."""
+    def __init__(self, url, last):
+        self.url=url; self.last=last
+        self.status=getattr(last,"code",None)
+        super().__init__(f"fetch failed: {url} ({last})")
+
 def fetch_json(url, tries=3):
     last=None
     for i in range(tries):
@@ -70,7 +93,7 @@ def fetch_json(url, tries=3):
                 return json.loads(r.read().decode("utf-8"))
         except Exception as e:
             last=e; time.sleep(3*(i+1))
-    raise RuntimeError(f"fetch failed: {url} ({last})")
+    raise FetchError(url, last)
 
 def fetch_text(url):
     with urlopen(Request(url, headers=HEADERS), timeout=120) as r:
@@ -139,11 +162,32 @@ def game_clock(g):
 def today_overlay(ingested_gids):
     """Returns (deltas: name->[8], active_games list)."""
     deltas={}; games=[]
+    FEED_HEALTH.clear()
+    FEED_HEALTH.update({"checked_utc":datetime.now(timezone.utc).isoformat(),
+                        "url":SCOREBOARD, "ok":False, "http":None, "error":None,
+                        "games_seen":0, "by_type":{}, "playoff_games":0,
+                        "boxscores_ok":0, "boxscores_failed":0})
     try:
         sb=fetch_json(SCOREBOARD)
     except Exception as e:
-        log(f"scoreboard unavailable ({e}) — no live overlay"); return deltas, games
-    for g in sb.get("scoreboard",{}).get("games",[]):
+        FEED_HEALTH["http"]=getattr(e,"status",None)
+        FEED_HEALTH["error"]=str(e)[:300]
+        log(f"FEED DOWN — scoreboard unavailable ({e}) — no live overlay")
+        log("  This is NOT the same as a quiet day: see data/leaderboards_live.json"
+            " -> feed")
+        return deltas, games
+    FEED_HEALTH["ok"]=True; FEED_HEALTH["http"]=200
+
+    all_games=sb.get("scoreboard",{}).get("games",[]) or []
+    FEED_HEALTH["games_seen"]=len(all_games)
+    for g in all_games:
+        gid=str(g.get("gameId",""))
+        k=SEASON_TYPE.get(gid[2] if len(gid)>2 else "", "other")
+        FEED_HEALTH["by_type"][k]=FEED_HEALTH["by_type"].get(k,0)+1
+    FEED_HEALTH["playoff_games"]=FEED_HEALTH["by_type"].get("playoff",0)
+    log(f"scoreboard OK: {len(all_games)} game(s) {FEED_HEALTH['by_type']}")
+
+    for g in all_games:
         gid=str(g.get("gameId",""))
         if len(gid)<3 or gid[2]!="4": continue            # playoff games only
         in_prog, status = game_clock(g)
@@ -156,7 +200,9 @@ def today_overlay(ingested_gids):
         if gid in ingested_gids: continue                  # already in DB — avoid double count
         try:
             box=fetch_json(BOXSCORE.format(gid=gid))
+            FEED_HEALTH["boxscores_ok"]=FEED_HEALTH.get("boxscores_ok",0)+1
         except Exception as e:
+            FEED_HEALTH["boxscores_failed"]=FEED_HEALTH.get("boxscores_failed",0)+1
             log(f"boxscore {gid} unavailable ({e})"); continue
         for side in ("homeTeam","awayTeam"):
             for p in box.get("game",{}).get(side,{}).get("players",[]):
@@ -365,9 +411,16 @@ def main():
 
     live={"last_polled_utc":datetime.now(timezone.utc).isoformat(),
           "active_games":active, "stats":boards, "watch_list":watch,
-          "recent_milestones":mstate["feed"]}
+          "recent_milestones":mstate["feed"],
+          "feed":dict(FEED_HEALTH)}
     json.dump(live, open(LIVE_PATH,"w",encoding="utf-8"), separators=(",",":"), ensure_ascii=False)
     log(f"wrote leaderboards: {new} new milestone(s), feed={len(mstate['feed'])}")
+    if FEED_HEALTH.get("ok"):
+        log(f"live feed OK — {FEED_HEALTH.get('games_seen',0)} game(s) on the"
+            f" scoreboard {FEED_HEALTH.get('by_type')}")
+    else:
+        log(f"live feed REFUSED — http={FEED_HEALTH.get('http')}"
+            f" {FEED_HEALTH.get('error')}")
 
 if __name__=="__main__":
     main()
