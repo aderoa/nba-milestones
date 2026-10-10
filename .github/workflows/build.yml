@@ -37,3 +37,22 @@ jobs:
           git add data
           if git diff --cached --quiet; then echo "No changes."; else
             git commit -m "Leaderboards update $(date -u +'%F %H:%M')"; git push; fi
+      # Runs AFTER the commit on purpose: the health block must reach the repo
+      # before the run goes red, so there is a record either way. Without this
+      # step a refused feed is indistinguishable from a day with no games.
+      - name: Live feed health gate
+        run: |
+          python - <<'PY'
+          import json, sys
+          f = (json.load(open("data/leaderboards_live.json")) or {}).get("feed") or {}
+          if f.get("ok"):
+              print(f"live feed OK - {f.get('games_seen',0)} game(s) {f.get('by_type')}")
+              sys.exit(0)
+          msg = (f"cdn.nba.com refused this runner: http={f.get('http')} "
+                 f"since {f.get('down_since')} (last OK {f.get('last_ok_utc')})")
+          if f.get("newly_broken"):
+              print(f"::error::{msg}")      # red run + email, once, on the break
+              sys.exit(1)
+          print(f"::warning::{msg} - still down, alarm already raised")
+          sys.exit(0)
+          PY
