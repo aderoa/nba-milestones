@@ -26,6 +26,40 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # TEMPORARY, branch only. Python, not shell: the first attempt used
+      # a shell variable holding a UA with spaces, which curl split into
+      # separate arguments and produced nonsense.
+      - name: Path map probe
+        run: |
+          python - <<'PY'
+          import json, urllib.request, urllib.error
+          H = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/124.0 Safari/537.36"),
+               "Referer": "https://www.nba.com/",
+               "Accept": "application/json, text/plain, */*"}
+          GID = "0012600015"
+          C = "https://cdn.nba.com/static/json"
+          urls = [
+            ("cdn liveData boxscore LIVE", f"{C}/liveData/boxscore/boxscore_{GID}.json"),
+            ("cdn liveData playbyplay", f"{C}/liveData/playbyplay/playbyplay_{GID}.json"),
+            ("cdn liveData todaysScoreboard", f"{C}/liveData/scoreboard/todaysScoreboard_00.json"),
+            ("cdn liveData dated scoreboard", f"{C}/liveData/scoreboard/scoreboard_20261010.json"),
+            ("cdn staticData schedule_1", f"{C}/staticData/scheduleLeagueV2_1.json"),
+            ("cdn logos svg", "https://cdn.nba.com/logos/nba/1610612738/global/L/logo.svg"),
+            ("stats scoreboardv3", "https://stats.nba.com/stats/scoreboardv3?GameDate=2026-10-10&LeagueID=00"),
+          ]
+          for label, u in urls:
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(u, headers=H), timeout=20) as r:
+                      print(f"::error::PROBE {label} -> {r.getcode()} ({len(r.read()):,} bytes)")
+              except urllib.error.HTTPError as e:
+                  print(f"::error::PROBE {label} -> HTTP {e.code}")
+              except Exception as e:
+                  print(f"::error::PROBE {label} -> {type(e).__name__}")
+          PY
+        continue-on-error: true
+
       - name: Build
         env:
           REPLAY_SEASON: ${{ github.event.inputs.replay_season }}
@@ -37,3 +71,22 @@ jobs:
           git add data
           if git diff --cached --quiet; then echo "No changes."; else
             git commit -m "Leaderboards update $(date -u +'%F %H:%M')"; git push; fi
+      # Runs AFTER the commit on purpose: the health block must reach the repo
+      # before the run goes red, so there is a record either way. Without this
+      # step a refused feed is indistinguishable from a day with no games.
+      - name: Live feed health gate
+        run: |
+          python - <<'PY'
+          import json, sys
+          f = (json.load(open("data/leaderboards_live.json")) or {}).get("feed") or {}
+          if f.get("ok"):
+              print(f"live feed OK - {f.get('games_seen',0)} game(s) {f.get('by_type')}")
+              sys.exit(0)
+          msg = (f"cdn.nba.com refused this runner: http={f.get('http')} "
+                 f"since {f.get('down_since')} (last OK {f.get('last_ok_utc')})")
+          if f.get("newly_broken"):
+              print(f"::error::{msg}")      # red run + email, once, on the break
+              sys.exit(1)
+          print(f"::warning::{msg} - still down, alarm already raised")
+          sys.exit(0)
+          PY
