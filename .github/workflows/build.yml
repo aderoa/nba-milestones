@@ -26,24 +26,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # TEMPORARY, branch only. A live box score from cdn.nba.com answered
-      # 200 on Alberto's machine while the scoreboard and the static schedule
-      # 403 — so the block is per-path, not per-host. Map which paths a
-      # RUNNER can reach, since that decides whether the overlay can stay
-      # here or must move to his machine. ::error:: because logs are
-      # unreadable from this session.
+      # TEMPORARY, branch only. Python, not shell: the first attempt used
+      # a shell variable holding a UA with spaces, which curl split into
+      # separate arguments and produced nonsense.
       - name: Path map probe
         run: |
-          p () { echo "::error::PROBE $1 -> $2"; }
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-          C="curl -s -m 20 -o /dev/null -w %{http_code} -A $UA -H Referer:https://www.nba.com/"
-          p "cdn liveData boxscore (LIVE GAME)" "$($C https://cdn.nba.com/static/json/liveData/boxscore/boxscore_0012600015.json || echo ERR)"
-          p "cdn liveData todaysScoreboard" "$($C https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json || echo ERR)"
-          p "cdn liveData dated scoreboard" "$($C https://cdn.nba.com/static/json/liveData/scoreboard/scoreboard_20261010.json || echo ERR)"
-          p "cdn staticData schedule_1" "$($C https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json || echo ERR)"
-          p "cdn liveData playbyplay" "$($C https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_0012600015.json || echo ERR)"
-          p "cdn liveData odds todaysOdds" "$($C https://cdn.nba.com/static/json/liveData/odds/odds_todaysGames.json || echo ERR)"
-          p "stats scoreboardv3" "$($C 'https://stats.nba.com/stats/scoreboardv3?GameDate=2026-10-10&LeagueID=00' || echo ERR)"
+          python - <<'PY'
+          import json, urllib.request, urllib.error
+          H = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/124.0 Safari/537.36"),
+               "Referer": "https://www.nba.com/",
+               "Accept": "application/json, text/plain, */*"}
+          GID = "0012600015"
+          C = "https://cdn.nba.com/static/json"
+          urls = [
+            ("cdn liveData boxscore LIVE", f"{C}/liveData/boxscore/boxscore_{GID}.json"),
+            ("cdn liveData playbyplay", f"{C}/liveData/playbyplay/playbyplay_{GID}.json"),
+            ("cdn liveData todaysScoreboard", f"{C}/liveData/scoreboard/todaysScoreboard_00.json"),
+            ("cdn liveData dated scoreboard", f"{C}/liveData/scoreboard/scoreboard_20261010.json"),
+            ("cdn staticData schedule_1", f"{C}/staticData/scheduleLeagueV2_1.json"),
+            ("cdn logos svg", "https://cdn.nba.com/logos/nba/1610612738/global/L/logo.svg"),
+            ("stats scoreboardv3", "https://stats.nba.com/stats/scoreboardv3?GameDate=2026-10-10&LeagueID=00"),
+          ]
+          for label, u in urls:
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(u, headers=H), timeout=20) as r:
+                      print(f"::error::PROBE {label} -> {r.getcode()} ({len(r.read()):,} bytes)")
+              except urllib.error.HTTPError as e:
+                  print(f"::error::PROBE {label} -> HTTP {e.code}")
+              except Exception as e:
+                  print(f"::error::PROBE {label} -> {type(e).__name__}")
+          PY
         continue-on-error: true
 
       - name: Build
