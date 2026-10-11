@@ -26,41 +26,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # TEMPORARY, branch only. ROUND 3: the earlier runner probe sent the
-      # LEAN header set and got 403 everywhere. On Alberto's machine the same
-      # path answered 200 when the stats-flavoured headers were used. So the
-      # question is no longer only "which path" but "which headers" -- and
-      # whether the runner's 403 was ever an IP block at all.
-      - name: Header x path probe
-        run: |
-          python - <<'PY'
-          import urllib.request, urllib.error
-          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-          LEAN = {"User-Agent": UA, "Referer": "https://www.nba.com/",
-                  "Origin": "https://www.nba.com",
-                  "Accept": "application/json, text/plain, */*"}
-          STATS = dict(LEAN, **{"Accept-Language": "en-US,en;q=0.9",
-                                "x-nba-stats-origin": "stats",
-                                "x-nba-stats-token": "true",
-                                "Connection": "keep-alive"})
-          C = "https://cdn.nba.com/static/json"
-          paths = [("boxscore", f"{C}/liveData/boxscore/boxscore_0012600015.json"),
-                   ("todaysScoreboard", f"{C}/liveData/scoreboard/todaysScoreboard_00.json"),
-                   ("schedule_1", f"{C}/staticData/scheduleLeagueV2_1.json")]
-          for pname, u in paths:
-              for hname, h in (("lean", LEAN), ("stats", STATS)):
-                  try:
-                      with urllib.request.urlopen(urllib.request.Request(u, headers=h), timeout=20) as r:
-                          res = f"{r.getcode()} ({len(r.read()):,} bytes)"
-                  except urllib.error.HTTPError as e:
-                      res = f"HTTP {e.code}"
-                  except Exception as e:
-                      res = type(e).__name__
-                  print(f"::error::PROBE {pname} + {hname} -> {res}")
-          PY
-        continue-on-error: true
-
       - name: Build
         env:
           REPLAY_SEASON: ${{ github.event.inputs.replay_season }}
