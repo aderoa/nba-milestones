@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NBA Playoff Milestones · HoopsMatic</title>
-<meta name="description" content="Live top-200 NBA career PLAYOFF leaderboards across 8 stats with in-game overlay and milestone tracking.">
+<title>NBA Milestones · HoopsMatic</title>
+<meta name="description" content="Live top-200 NBA career regular-season and playoff leaderboards across 8 stats with in-game overlay and milestone tracking.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
@@ -340,15 +340,23 @@
   body.log-only .tabs,
   body.log-only .table-wrap { display: none !important; }
   body.log-only #milestones-wrap { display: block !important; }
+
+  .board-switch { margin-top: 12px; }
+  .season-note { color: var(--muted); font-size: 0.8rem; margin-top: 8px; font-family: var(--header-font); }
 </style>
 </head>
 <body>
 <div class="container">
 
 <header>
-  <div class="brand">HoopsMatic / NBA Playoff Milestones</div>
-  <h1>NBA Playoff All-Time Leaderboards</h1>
-  <p class="subtitle">Live top-200 in <code>PTS · REB · AST · BLK · STL · 3PM · TOV · PF</code>. Active in-game players are flagged with their today-delta.</p>
+  <div class="brand">HoopsMatic / NBA Milestones</div>
+  <h1 id="page-title">NBA All-Time Leaderboards</h1>
+  <p class="subtitle">Live top-200 career <span id="type-word">regular-season</span> totals in <code>PTS · REB · AST · BLK · STL · 3PM · TOV · PF</code>. Active in-game players are flagged with their today-delta.</p>
+  <div class="filter-group board-switch" id="board-switch">
+    <button class="filter-pill" data-type="regular">Regular season</button>
+    <button class="filter-pill" data-type="playoffs">Playoffs</button>
+  </div>
+  <div class="season-note" id="season-note"></div>
 </header>
 
 <div class="live-bar" id="live-bar">
@@ -406,8 +414,15 @@ const TITLES = {
   MILESTONES: 'Milestones',
 };
 
-// URL params: ?embed=1 (Presto-friendly chrome-less view), ?view=log (only milestones)
+// URL params: ?embed=1 (Presto-friendly chrome-less view), ?view=log (only milestones),
+// ?type=regular|playoffs (which board; default follows the calendar, playoffs 18 Apr - 30 Jun)
 const params = new URLSearchParams(location.search);
+const DATA_FILES = { regular: 'data/leaderboards_live.json', playoffs: 'data/playoffs_live.json' };
+function defaultType() {
+  const d = new Date(), m = d.getMonth() + 1;
+  return ((m === 4 && d.getDate() >= 18) || m === 5 || m === 6) ? 'playoffs' : 'regular';
+}
+let boardType = DATA_FILES[params.get('type')] ? params.get('type') : defaultType();
 if (params.get('embed') === '1') document.body.classList.add('embed');
 const initialView = params.get('view');
 if (initialView === 'log') document.body.classList.add('log-only');
@@ -542,6 +557,27 @@ function renderMilestones() {
   el.innerHTML = html;
 }
 
+function renderBoardType() {
+  const po = boardType === 'playoffs';
+  document.getElementById('page-title').textContent = po ? 'NBA Playoff All-Time Leaderboards' : 'NBA All-Time Leaderboards';
+  document.getElementById('type-word').textContent = po ? 'playoff' : 'regular-season';
+  document.title = (po ? 'NBA Playoff Milestones' : 'NBA Milestones') + ' · HoopsMatic';
+  document.querySelectorAll('#board-switch .filter-pill').forEach(b =>
+    b.classList.toggle('active', b.dataset.type === boardType));
+  const note = document.getElementById('season-note');
+  if (!liveData) { note.textContent = ''; return; }
+  const through = liveData.archived_through
+    ? new Date(liveData.archived_through + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' })
+    : '';
+  if (po && !through) {
+    const y = liveData.base_through;
+    note.textContent = y ? `Career playoff totals through the ${y - 1}-${String(y % 100).padStart(2, '0')} playoffs` : '';
+  } else {
+    note.textContent = `${liveData.season} ${po ? 'playoffs' : 'regular season'}` +
+      (through ? ` · games through ${through}, plus tonight's live` : '');
+  }
+}
+
 function renderTimestamp() {
   const el = document.getElementById('last-updated');
   if (!liveData) { el.textContent = '—'; return; }
@@ -557,9 +593,13 @@ function escapeHtml(s) {
 
 async function fetchData() {
   try {
-    const res = await fetch('data/leaderboards_live.json?_=' + Date.now());
+    const want = boardType;
+    const res = await fetch(DATA_FILES[want] + '?_=' + Date.now());
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    liveData = await res.json();
+    const json = await res.json();
+    if (want !== boardType) return;          // switched while loading
+    liveData = json;
+    renderBoardType();
     renderTabs();
     renderLiveBar();
     updateView();
@@ -571,14 +611,28 @@ async function fetchData() {
   }
 }
 
+renderBoardType();
 renderTabs();
 
+document.querySelectorAll('#board-switch .filter-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.type === boardType) return;
+    boardType = btn.dataset.type;
+    const p = new URLSearchParams(location.search);
+    p.set('type', boardType);
+    history.replaceState(null, '', '?' + p.toString() + location.hash);
+    liveData = null;
+    renderBoardType();
+    fetchData();
+  });
+});
+
 // Wire active-only / all-players segmented filter
-document.querySelectorAll('.filter-pill').forEach(btn => {
+document.querySelectorAll('#filter-group .filter-pill').forEach(btn => {
   btn.addEventListener('click', () => {
     const choice = btn.dataset.filter;
     activeOnly = (choice === 'active');
-    document.querySelectorAll('.filter-pill').forEach(b => {
+    document.querySelectorAll('#filter-group .filter-pill').forEach(b => {
       b.classList.toggle('active', b.dataset.filter === choice);
     });
     updateView();
