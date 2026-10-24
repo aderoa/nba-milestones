@@ -43,11 +43,20 @@ A quiet run, with no game in progress and nothing changed, keeps the old file an
 
 The workflow (`.github/workflows/build.yml`) is manual only. It can rebuild the playoff board or replay a season from the archive repo. If a regular-season run reaches no current-season data, it refuses to write, so it never overwrites the board built locally.
 
-## Known gaps in the historical base
+## Official season totals for the old seasons
 
-The base is summed from game-level box scores. Where the NBA's own game logs are incomplete, a career total runs a little under the official figure. The main cases:
+The base is summed from game-level box scores. For the 1970s and early 80s, the NBA's own game logs are missing lines that its season totals have. Without a fix, Kareem has 3,037 career blocks instead of the official 3,189, and Bill Russell has 21,198 rebounds instead of 21,620.
 
-- **Blocks and steals in 1973-74 to 1983-84:** many box scores lack them, so Kareem shows 3,037 blocks against the official 3,189.
-- **Rebounds before 1974:** Bill Russell shows 21,198 against 21,620.
+`scripts/official_seasons.py` fixes this. It runs locally, needs `nba_api`, and takes about 45 minutes the first time; after that it reads from its cache.
 
-Players who started after 1984 are complete.
+1. It fetches each player's official season totals from stats.nba.com `PlayerCareerStats`. It does this for every player with a season up to 1984-85, about 1,900 players.
+2. It compares every one of those players' seasons with the box-score sum.
+3. Where a season differs, it records the official season in `data/official_season_fixes.json`. A stat the NBA didn't keep that year, such as blocks before 1973-74, keeps the box-score value.
+4. It rebuilds both bases from the archive with those seasons swapped in.
+
+```bat
+python scripts\official_seasons.py --dry-run   :: fetch and compare, write nothing
+python scripts\official_seasons.py --push
+```
+
+`build_milestones.py --rebuild-base` repeats step 4 on its own, for example after the archive changes.

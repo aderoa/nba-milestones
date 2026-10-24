@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NBA Milestones — leaderboard generator.  v2.0.0-regular-season
+NBA Milestones — leaderboard generator.  v2.1.0-official-seasons
 
 Two boards, one script. --mode picks which one this run builds:
 
@@ -43,6 +43,9 @@ WHERE IT RUNS: LOCALLY, on Alberto's machine
   --push         git pull --rebase, commit data/, push
   --no-live      skip the live overlay (archive only)
   --log FILE     also append each run's lines to FILE (pythonw has no console)
+  --rebuild-base re-sum the --mode's base from the whole archive,
+                 with data/official_season_fixes.json (official_seasons.py)
+                 replacing the seasons the box scores get wrong
   --allow-stale  write even when the current season could not be read.
                  Without it a run that finds no current-season data during a
                  season refuses to write, so a cloud run can never replace a
@@ -59,7 +62,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
-VERSION = "v2.0.0-regular-season"
+VERSION = "v2.1.0-official-seasons"
 
 try:
     from zoneinfo import ZoneInfo
@@ -256,6 +259,56 @@ def load_or_roll_base():
     if rolled:
         json.dump(base, open(path,"w",encoding="utf-8"), separators=(",",":"), ensure_ascii=False)
     return base
+
+FIXES_PATH = os.path.join(DATA, "official_season_fixes.json")
+
+def load_fixes():
+    """data/official_season_fixes.json, written by official_seasons.py:
+    {"regular"|"playoffs": {personId: {season_end_year: [8 stats + GP]}},
+     "names": {personId: archive name}}. Each entry REPLACES the box-score sum
+    for that player-season, because the NBA's game logs for those seasons are
+    missing lines that its season totals have."""
+    if not os.path.exists(FIXES_PATH): return {}, {}
+    f=json.load(open(FIXES_PATH, encoding="utf-8"))
+    return f.get(M["name"]) or {}, f.get("names") or {}
+
+def rebuild_base():
+    """Re-sum the whole base from the archive, season by season, with the
+    official season totals in place of the box-score sums where they differ."""
+    path=os.path.join(DATA, M["base"])
+    old=json.load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
+    through=old.get("through_season") or current_sy()-1
+    fixes, fnames=load_fixes()
+    players={}; names={}; fixed=0
+    for sy in range(1947, through+1):
+        text=season_text(sy, "boxscores")
+        if not text:
+            raise RuntimeError(f"season {sy} missing from the archive — base not rebuilt")
+        season={}
+        for row in rows_of(text):
+            k=key_of(row); names[k]=row["name"]
+            a=season.setdefault(k,[0]*9)
+            for i,kk in enumerate(KEYS):
+                v=row.get(kk)
+                if isinstance(v,(int,float)): a[i]+=v
+            a[8]+=1
+        for pid,bys in fixes.items():
+            vals=bys.get(str(sy))
+            if vals is None: continue
+            nm=names.get(pid) or fnames.get(pid)
+            k=key_of({"personId":pid,"name":nm})
+            if k is None: continue
+            season[k]=list(vals); fixed+=1
+            if M["key"]=="personId" and k not in names and nm: names[k]=nm
+        for k,a in season.items():
+            t=players.setdefault(k,[0]*9)
+            for i in range(9): t[i]+=a[i]
+    base={"through_season":through, "key":M["key"], "players":players}
+    if M["key"]=="personId": base["names"]=names
+    base["official_seasons"]=fixed
+    json.dump(base, open(path,"w",encoding="utf-8"), separators=(",",":"), ensure_ascii=False)
+    log(f"rebuilt {M['base']}: 1947-{through}, {len(players)} players,"
+        f" {fixed} player-season(s) from official totals")
 
 def names_map():
     try:
@@ -478,6 +531,9 @@ def main():
     ap.add_argument("--no-live", action="store_true")
     ap.add_argument("--allow-stale", action="store_true")
     ap.add_argument("--log", default="", help="also append the run's lines to this file")
+    ap.add_argument("--rebuild-base", action="store_true",
+                    help="re-sum the base from the archive, applying"
+                         " data/official_season_fixes.json, then build as usual")
     a=ap.parse_args()
     try: sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception: pass
@@ -488,6 +544,8 @@ def main():
     log(f"build_milestones {VERSION}  mode={mode}  archive={ARCHIVE or 'GitHub'}")
 
     os.makedirs(DATA, exist_ok=True)
+    if a.rebuild_base:
+        rebuild_base()
     base=load_or_roll_base()
     sy=current_sy()
     nmap=names_map()
